@@ -6,58 +6,50 @@ module.exports = async (page, url) => {
         await client.send('Network.clearBrowserCookies');
         await client.send('Network.clearBrowserCache');
 
-        await page.setUserAgent(isM 
-            ? 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Mobile/15E148 Safari/604.1' 
+        await page.setUserAgent(isM
+            ? 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Mobile/15E148 Safari/604.1'
             : 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
-        
-        await page.setViewport(isM 
-            ? { width: 390, height: 844, isMobile: true, hasTouch: true } 
+
+        await page.setViewport(isM
+            ? { width: 390, height: 844, isMobile: true, hasTouch: true }
             : { width: 1440, height: 900 });
 
-        // 🛡️ [핵심 추가 우회 로직] 브라우저 내부 지문(Fingerprint) 위장
-        // 페이지의 HTML이 로드되기 전에 먼저 실행되어 봇 탐지 센서를 무력화합니다.
         await page.evaluateOnNewDocument(() => {
-            // 1. "나는 로봇(Webdriver)이 아닙니다" 라고 브라우저 속성 덮어쓰기
             Object.defineProperty(navigator, 'webdriver', { get: () => false });
-            
-            // 2. 가상의 크롬 객체 생성 (일반 크롬 브라우저처럼 보이게 함)
-            window.chrome = {
-                runtime: {},
-                loadTimes: function() {},
-                csi: function() {},
-                app: {}
-            };
-
-            // 3. 플러그인 개수 속이기 (봇 브라우저는 보통 플러그인이 0개임)
+            window.chrome = { runtime: {}, loadTimes: function() {}, csi: function() {}, app: {} };
             Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3] });
             Object.defineProperty(navigator, 'languages', { get: () => ['ko-KR', 'ko', 'en-US', 'en'] });
         });
 
         const boardId = url.split('id=')[1]?.split('&')[0];
-        let referer = isM ? 'https://m.ppomppu.co.kr/' : 'https://www.ppomppu.co.kr/';
-        if (boardId) {
-            referer += isM ? `zboard.php?id=${boardId}` : `zboard/zboard.php?id=${boardId}`;
-        }
+        // [수정] 목록 페이지 경로 정정: zboard/zboard.php(X) → zboard.php(O)
+        const boardUrl = isM
+            ? `https://m.ppomppu.co.kr/new/zboard.php?id=${boardId}`
+            : `https://www.ppomppu.co.kr/zboard.php?id=${boardId}`;
 
-        await page.setExtraHTTPHeaders({ 
-            'referer': referer,
+        await page.setExtraHTTPHeaders({
             'accept-language': 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7'
         });
 
-        await page.goto(url, { waitUntil: 'networkidle2', timeout: 45000 });
+        // [추가] 1) 목록 페이지 선행 방문 — 세션 쿠키 발급 (뽐뿌 카운터는
+        // 게시판 유입 세션이 있어야 조회수를 반영하는 것으로 추정)
+        await page.goto(boardUrl, { waitUntil: 'domcontentloaded', timeout: 45000 }).catch(() => {});
+        await new Promise(r => setTimeout(r, 1200 + Math.random() * 1000));
+
+        // 2) 게시글 진입 (목록 → 본문 자연 유입 흐름)
+        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 45000 });
 
         await page.evaluate(async () => {
             const scrollHeight = document.body.scrollHeight;
-            const targetDepth = scrollHeight * (0.5 + Math.random() * 0.3); 
+            const targetDepth = scrollHeight * (0.5 + Math.random() * 0.3);
             const step = 200;
-            
             for (let i = 0; i < targetDepth; i += step) {
                 window.scrollBy({ top: step, behavior: 'smooth' });
                 await new Promise(r => setTimeout(r, 200 + Math.random() * 150));
             }
         });
 
-        await page.mouse.click(150 + Math.random() * 100, 200 + Math.random() * 100);
+        await page.mouse.click(150 + Math.random() * 100, 200 + Math.random() * 100).catch(() => {});
 
         const stayTime = 5000 + Math.floor(Math.random() * 3000);
         await new Promise(r => setTimeout(r, stayTime));
