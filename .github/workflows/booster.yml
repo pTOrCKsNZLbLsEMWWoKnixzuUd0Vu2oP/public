@@ -42,7 +42,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '18'
-          cache: 'npm'
 
       - name: Install Dependencies
         env:
@@ -60,4 +59,4 @@ jobs:
           DELAY=$((1 + RANDOM % 60))
           echo "Waiting for $DELAY seconds..."
           sleep $DELAY
-          node github_worker.js "${{ github.event.inputs.target_url }}" "${{ github.event.inputs.site_type }}" "${{ github.event.inputs.total_count }}" "${{ github.event.inputs.user_id }}"
+          node github_worker.js "${{ github.event.inputs.target_url }}" "${{ github.event.inputs.site_type }}" "${{ github.event.inputs.total_count }}" "${{ github.event.inputs.user_id }}" "${{ github.event.inputs.delay }}"
