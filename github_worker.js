@@ -31,6 +31,7 @@ const runYgosu = require('./boosters/ygosu');
 const runDealbada = require('./boosters/dealbada');
 const runTe31 = require('./boosters/te');
 const runZod = require('./boosters/zod');
+const runCity = require('./boosters/city');
 const runDasaja = require('./boosters/dasaja');
 const runDeokjil = require('./boosters/deokjil');
 const runSlrclub = require('./boosters/slrclub');
@@ -50,7 +51,7 @@ const boosters = {
     EOMISAE: runEomisae, MIMINT: runMimint, JAYOUNG: runJayoung, YGOSU: runYgosu,
     BLIND: runBlind, DEALBADA: runDealbada, TE31: runTe31, ZOD: runZod,
     DASAJA: runDasaja, DEOKJIL: runDeokjil, SLRCLUB: runSlrclub,
-    NAVER_STOCK: runNaverStock
+    NAVER_STOCK: runNaverStock, CITY: runCity
 };
 
 async function start() {
