@@ -182,6 +182,15 @@ const COUNT_RULES = {
     DEOKJIL:    { sel: '.btm_area .side.fr span:nth-child(1) b' },
     BBASAK:     { sel: '.bo_v_num, .view_info, .hit, .count', re: '조회[^:]*[:]?\\s*([\\d,]+)' },
     DVDPRIME:   { sel: '#view_hit, .hit, .view, .count', re: '([\\d,]{1,12})' },
+    ZOD:        { sel: '.app-list-meta, .article-head, dd', re: '조회수[^0-9]{0,30}([\\d,]+)' },
+    PPOMPPU:    { sel: '.view_info, .board-view-info, li', re: '조회수\\s*([\\d,]+)' },
+    DASAJA:     { sel: '.bo_v_info, #bo_v_info, .view_info', re: '조회\\s*[:]?\\s*([\\d,]+)' },
+    QUASARZONE: { sel: '.v2-meta, .qz-view-head', re: '조회\\s*([\\d,]+)' },
+    ARCALIVE:   { sel: '.article-info, .article-meta, .info-row', re: '조회수[^0-9]{0,50}([\\d,]{5,})' },
+    YGOSU:      { sel: 'div.date, .tw:text-sm', re: 'READ\\s*[:]?\\s*([\\d,]+)' },
+    MIMINT:     { sel: '.meta-item, .reply', re: '조회\\s*([\\d,]+)' },
+    MLBPARK:    { sel: 'span.val, .view_info', re: '조회[^0-9]{0,30}([\\d,]+)' },
+    INSTIZ:     { sel: '#hit, .memo_view', re: '([\\d,]{1,8})' },
     FOOTSELL:   { sel: '.view_count, .hit, .read' },
     CITY:       { sel: '.post_info .count, .count, .hit' },
     NAVER_KIN:  { sel: '.userInfo.userInfo__bullet .infoItem, .endContents .count' },
@@ -192,8 +201,20 @@ const COUNT_RULES = {
 
 // ===== Puppeteer DOM 기반 조회수 읽기 =====
 async function readCountPuppeteer(page, siteType) {
+    if (!page) return null;
     const rule = COUNT_RULES[siteType];
-    if (!rule || !page) return null;
+    try {
+        // 룰 없으면 innerText 스캔
+        if (!rule) {
+            const val = await page.evaluate(() => {
+                const txt = (document.body ? document.body.innerText : '').slice(0, 20000);
+                const pats = [/조회\s*수?\s*[:：]?\s*([\d,]{1,12})/, /READ\s*[:：]?\s*([\d,]{1,12})/i, /([\d,]{1,12})\s*명이 읽었어요/, /조회\s*수?.{0,20}?([\d,]{2,10})/];
+                for (const p of pats) { const m = txt.match(p); if (m) { const n = parseInt(m[1].replace(/,/g, ''),10); if (n>0) return n; } }
+                return null;
+            });
+            return (typeof val === 'number' && val > 0) ? val : null;
+        }
+    } catch (e) { return null; }
     try {
         const val = await page.evaluate((sel, reSrc) => {
             let re = null;
