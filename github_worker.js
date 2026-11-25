@@ -37,6 +37,9 @@ const runDasaja = require('./boosters/dasaja');
 const runDeokjil = require('./boosters/deokjil');
 const runSlrclub = require('./boosters/slrclub');
 const runNaverStock = require('./boosters/naver_stock');
+const runBbasak = require('./boosters/bbasak');
+const runDvdprime = require('./boosters/dvdprime');
+const runFootsell = require('./boosters/footsell');
 
 const stealth = StealthPlugin();
 stealth.enabledEvasions.delete('user-agent-override');
@@ -44,7 +47,7 @@ puppeteer.use(stealth);
 
 const boosters = {
     INSTIZ: runInstiz, THEQOO: runTheqoo, PPOMPPU: runPpomppu,
-    FEMCO: runFemco, NAVER: runNaver, RULIWEB: runRuliweb, NAVER_KIN: runNaverKin,
+    FEMCO: runFemco, FMKOREA: runFemco, NAVER: runNaver, RULIWEB: runRuliweb, NAVER_KIN: runNaverKin,
     QUASARZONE: runQuasarzone, ARCALIVE: runArcalive, INVEN: runInven,
     DOGDRIP: runDogdrip, DCINSIDE: runDcinside, DONPPU: runDonppu, DAUM: runDaum,
     DIMITORY: runDimitory, FANCUG: runFancug, THREDIC: runThredic, ETOLAND: runEtoland,
@@ -52,7 +55,8 @@ const boosters = {
     EOMISAE: runEomisae, MIMINT: runMimint, JAYOUNG: runJayoung, YGOSU: runYgosu,
     BLIND: runBlind, DEALBADA: runDealbada, TE31: runTe31, ZOD: runZod,
     DASAJA: runDasaja, DEOKJIL: runDeokjil, SLRCLUB: runSlrclub,
-    NAVER_STOCK: runNaverStock, CITY: runCity
+    NAVER_STOCK: runNaverStock, CITY: runCity,
+    BBASAK: runBbasak, DVDPRIME: runDvdprime, FOOTSELL: runFootsell
 };
 
 // ===== HTTP fetch helper =====
@@ -176,6 +180,8 @@ const COUNT_RULES = {
     FANCUG:     { sel: '.post-info .hit, .hit' },
     BOBAEDREAM:{ sel: '.countGroup .txtType, .util .data4' },
     DEOKJIL:    { sel: '.btm_area .side.fr span:nth-child(1) b' },
+    BBASAK:     { sel: '.bo_v_num, .view_info, .hit, .count', re: '조회[^:]*[:]?\\s*([\\d,]+)' },
+    DVDPRIME:   { sel: '#view_hit, .hit, .view, .count', re: '([\\d,]{1,12})' },
     FOOTSELL:   { sel: '.view_count, .hit, .read' },
     CITY:       { sel: '.post_info .count, .count, .hit' },
     NAVER_KIN:  { sel: '.userInfo.userInfo__bullet .infoItem, .endContents .count' },
