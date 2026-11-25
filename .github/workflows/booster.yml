@@ -47,7 +47,7 @@ jobs:
         env:
           PUPPETEER_SKIP_CHROMIUM_DOWNLOAD: 'true'
         run: |
-          npm install puppeteer-extra puppeteer-extra-plugin-stealth user-agents mongodb axios
+          npm install puppeteer-extra puppeteer-extra-plugin-stealth user-agents mongodb axios iconv-lite
           sudo apt-get update
           sudo apt-get install -y google-chrome-stable libgbm-dev
 
