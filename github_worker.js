@@ -184,16 +184,8 @@ const COUNT_RULES = {
     NAVER:      { sel: '.article_info .count, .count' },
 };
 
-// ===== 크로스 사이트 통합 조회수 읽기 =====
-async function readCount(page, siteType, url) {
-    // 1순위: HTTP 리더
-    if (HTTP_COUNT[siteType]) {
-        try {
-            const val = await HTTP_COUNT[siteType](url);
-            if (typeof val === 'number' && val > 0) return val;
-        } catch (e) { /* HTTP 실패 → Puppeteer 폴백 */ }
-    }
-    // 2순위: Puppeteer 브라우저 리더 (page가 null이면 건너뜀)
+// ===== Puppeteer DOM 기반 조회수 읽기 =====
+async function readCountPuppeteer(page, siteType) {
     const rule = COUNT_RULES[siteType];
     if (!rule || !page) return null;
     try {
@@ -355,74 +347,72 @@ async function start() {
                     req.continue();
                 });
 
-                // ===== 1) 부스터 실행 전 기준 조회수 확보 (HTTP 우선) =====
+                // ===== 1) 부스터 실행 전 기준 조회수 확보 =====
+                // HTTP가 가능하면 먼저 시도. 안 되면 브라우저 페이지 로드 후 DOM에서 읽는다.
                 let before = null;
                 if (hasHttpReader) {
                     try { before = await HTTP_COUNT[siteType](targetUrl); } catch(e) {}
-                }
-                if (before == null && hasRule) {
-                    before = await readCount(page, siteType, targetUrl); // Puppeteer 폴백
+                    if (before != null) console.log(`[${userId}][W${workerId}] [HTTP-before] ${before}`);
                 }
 
-                // ===== 2) 부스터 실행 (best-effort) =====
+                // ===== 2) 부스터 실행 =====
                 const runBooster = boosters[siteType];
-                let boosterOk = false;
-
-                if (runBooster) {
-                    const boosterResult = await runBooster(page, targetUrl, (msg) => 
-                        console.log(`[${userId}][W${workerId}] ${msg}`)
-                    ).catch(e => {
-                        console.log(`[${userId}][W${workerId}] 시도 실패: ${e.message}`);
-                        return false;
-                    });
-                    boosterOk = (boosterResult === true);
-                } else {
+                if (!runBooster) {
                     console.log(`[${userId}][W${workerId}] 미지원 사이트: ${siteType}`);
                     if (context !== browser) await context.close().catch(() => {});
                     break; 
                 }
 
+                const boosterResult = await runBooster(page, targetUrl, (msg) => 
+                    console.log(`[${userId}][W${workerId}] ${msg}`)
+                ).catch(e => {
+                    console.log(`[${userId}][W${workerId}] 부스터 예외: ${e.message}`);
+                    return false;
+                });
+
+                // ===== 3) 부스터 직후, 페이지가 열려있는 상태에서 조회수 읽기 =====
+                let cur = null;
+                // 3a) HTTP 우선 (브라우저와 무관, 가장 정확)
+                if (hasHttpReader) {
+                    try { cur = await HTTP_COUNT[siteType](targetUrl); } catch(e) {}
+                    if (cur != null) console.log(`[${userId}][W${workerId}] [HTTP-after] ${cur}`);
+                }
+                // 3b) HTTP 실패 → Puppeteer DOM에서 직접 읽기 (페이지가 아직 열려있음)
+                if (cur == null && hasRule) {
+                    cur = await readCountPuppeteer(page, siteType);
+                    if (cur != null) console.log(`[${userId}][W${workerId}] [DOM-after] ${cur}`);
+                }
+                // 3c) before도 없으면 Puppeteer DOM에서 before도 읽기
+                if (before == null && hasRule) {
+                    before = await readCountPuppeteer(page, siteType);
+                    if (before != null) console.log(`[${userId}][W${workerId}] [DOM-before] ${before}`);
+                }
+
+                // 페이지 정리
                 if (context !== browser) await context.close().catch(() => {});
                 else await page.close().catch(() => {});
 
-                // ===== 3) 부스터 후 조회수 읽기 및 델타 검증 =====
-                let cur = null;
-                if (hasHttpReader) {
-                    try { cur = await HTTP_COUNT[siteType](targetUrl); } catch(e) {}
-                }
-                if (cur == null && hasRule) {
-                    // HTTP 실패 시 브라우저로 재시도 불가(페이지 이미 닫힘) → 건너뜀
-                }
-
+                // ===== 4) 델타 검증 =====
                 if (!canVerify) {
                     unverifiedTotal += 1;
                     await record({ counted: false, unverified: true, cur: null });
                     console.log(`[MongoDB] ${siteType} 미검증 집계 (조회수 규칙 없음)`);
-                } else if (cur == null && before == null) {
-                    await record({ counted: false, unverified: false, cur: null });
-                    console.log(`[검증] ${siteType} 조회수 읽기 실패 (before/after 모두 null) — 판정 보류`);
                 } else if (cur == null) {
                     await record({ counted: false, unverified: false, cur: before });
-                    console.log(`[검증] ${siteType} after 읽기 실패 — 판정 보류 (before=${before})`);
-                } else if (lastSeen == null && before != null) {
-                    lastSeen = before;
-                    await record({ counted: false, unverified: false, cur: before });
-                    console.log(`[검증] ${siteType} 기준 조회수 설정: ${before}`);
-                    // 첫 회차에서 증가했으면 반영
-                    if (cur > before) {
-                        countedTotal += 1;
-                        lastSeen = cur;
-                        await record({ counted: true, unverified: false, cur: cur });
-                        console.log(`[검증] ${siteType} 조회수 증가 확인 → 집계 (${before} → ${cur})`);
-                    }
+                    console.log(`[검증] ${siteType} 조회수 읽기 실패 — 판정 보류 (before=${before})`);
+                } else if (lastSeen == null) {
+                    // 첫 관측: 기준값만 저장
+                    lastSeen = before != null ? before : cur;
+                    await record({ counted: false, unverified: false, cur: cur });
+                    console.log(`[검증] ${siteType} 기준 조회수 설정: ${lastSeen} (현재=${cur})`);
                 } else if (cur > lastSeen) {
                     countedTotal += 1;
                     lastSeen = cur;
                     await record({ counted: true, unverified: false, cur: cur });
-                    console.log(`[검증] ${siteType} 조회수 증가 확인 → 집계 (현재 ${cur})`);
+                    console.log(`[검증] ${siteType} 조회수 증가 확인 → 집계 (${lastSeen} → ${cur}, +${cur - lastSeen})`);
                 } else {
                     await record({ counted: false, unverified: false, cur: cur });
-                    console.log(`[검증] ${siteType} 조회수 미반영 (${lastSeen} → ${cur}) — 미집계`);
+                    console.log(`[검증] ${siteType} 조회수 미반영 (${lastSeen} → ${cur})`);
                 }
                 
                 await new Promise(r => setTimeout(r, (delay * 1000) + Math.random() * 2000));
