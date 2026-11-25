@@ -359,12 +359,13 @@ async function start() {
                 let isSuccess = false;
 
                 if (runBooster) {
-                    isSuccess = await runBooster(page, targetUrl, (msg) => 
+                    const boosterResult = await runBooster(page, targetUrl, (msg) => 
                         console.log(`[${userId}][W${workerId}] ${msg}`)
-                    ).then(() => true).catch(e => {
+                    ).catch(e => {
                         console.log(`[${userId}][W${workerId}] 시도 실패: ${e.message}`);
                         return false;
                     });
+                    isSuccess = (boosterResult === true); // 엄격: true만 성공
                 } else {
                     console.log(`[${userId}][W${workerId}] 미지원 사이트: ${siteType}`);
                     if (context !== browser) await context.close().catch(() => {});
