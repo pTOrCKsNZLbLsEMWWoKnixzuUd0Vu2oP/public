@@ -54,6 +54,63 @@ const boosters = {
     NAVER_STOCK: runNaverStock, CITY: runCity
 };
 
+// ===== 조회수 검증 규칙 =====
+// 로컬 엔진에서 실제 조회수 읽기가 확인된 사이트만 등록한다.
+// sel: 후보 셀렉터(콤마 구분), re: 조회수 텍스트 패턴(캡처 1 = 숫자).
+// re가 없으면 선택 요소의 첫 숫자를 조회수로 본다.
+const COUNT_RULES = {
+    PPOMPPU:    { sel: '.topTitle-mainbox, .bbs.view .info, .info', re: '(?:조회수|조회)\\s*[:]?\\s*([\\d,]+)' },
+    INVEN:      { sel: '.articleHit, .viewCount, .hit, .article-info', re: '(?:조회|Views|Hit)\\s*[:]?\\s*([\\d,]+)' },
+    RULIWEB:    { sel: '.hit strong, .hit_low strong, .hit_medium strong, .hit_high strong' },
+    DCINSIDE:   { sel: '.gall_count, .gallview_head .gall_count, .view_info .gall_count, .fr .gall_count' },
+    DONPPU:     { sel: '.count_read, .count' },
+    DIMITORY:   { sel: '.side.fr span:nth-child(1) b, .rd_hd .side.fr b, .btm_area .side.fr b' },
+    THREDIC:    { sel: '.all.read .hit, .hit' },
+    NATEPANN:   { sel: '.post-tit-info .count' },
+    MLBPARK:    { sel: '.text2', re: '조회\\s*([\\d,]+)' },
+    EOMISAE:    { sel: '._hd .btm_area, .btm_area' },
+    SLRCLUB:    { sel: 'td.click, .click' },
+    JAYOUNG:    { sel: '.rb_bbs_for_btm_info dd:first-child span' },
+    DEALBADA:   { sel: '#bo_v_info', re: '조회\\s*([\\d,]+)' },
+    TE31:       { sel: '.mbox', re: '([\\d,]+)\\s*명이 읽었어요' },
+    ARCALIVE:   { sel: '.article-info', re: '(?:Views|조회수)\\s*([\\d,]+)' },
+    THEQOO:     { sel: '.rd_hd .count_container, .theqoo_document_header .count_container' },
+    FEMCO:      { sel: '.rd_hd .btm_area .side.fr', re: '조회\\s*수?\\s*([\\d,]+)' },
+};
+
+// 페이지에서 조회수를 읽는다. 규칙이 없거나 읽기 실패면 null(검증 불가).
+async function readCount(page, siteType) {
+    const rule = COUNT_RULES[siteType];
+    if (!rule) return null;
+    try {
+        const val = await page.evaluate((sel, reSrc) => {
+            let re = null;
+            try { re = reSrc ? new RegExp(reSrc) : null; } catch (e) { re = null; }
+            const els = document.querySelectorAll(sel);
+            for (const el of els) {
+                const text = (el.textContent || '').replace(/\\s+/g, ' ');
+                if (re) {
+                    const m = text.match(re);
+                    if (m && m[1]) {
+                        const n = parseInt(m[1].replace(/,/g, ''), 10);
+                        if (n > 0) return n;
+                    }
+                } else {
+                    const m = text.match(/([\\d,]{1,12})/);
+                    if (m && m[1]) {
+                        const n = parseInt(m[1].replace(/,/g, ''), 10);
+                        if (n > 0) return n;
+                    }
+                }
+            }
+            return null;
+        }, rule.sel, rule.re || null);
+        return (typeof val === 'number' && val > 0) ? val : null;
+    } catch (e) {
+        return null;
+    }
+}
+
 async function start() {
     const targetUrl = process.argv[2];
     const siteType = process.argv[3];
@@ -77,7 +134,8 @@ async function start() {
         process.exit(0);
     }
 
-    console.log(`🚀 [사용자: ${userId}] 워커 ${workerId} 가동 (대상: ${siteType}, 목표: ${myIterations}회)`);
+    const canVerify = !!COUNT_RULES[siteType];
+    console.log(`🚀 [사용자: ${userId}] 워커 ${workerId} 가동 (대상: ${siteType}, 목표: ${myIterations}회, 검증: ${canVerify ? '조회수 비교' : '불가(규칙 없음)'})`);
 
     // 💡 [최적화 1] 반복문 진입 전 MongoDB 커넥션을 딱 1번만 연결합니다.
     const { MongoClient } = require('mongodb');
@@ -125,6 +183,36 @@ async function start() {
     };
 
     const browser = await launchBrowser();
+    let lastSeen = null;       // 마지막으로 관측한 절대 조회수
+    let countedTotal = 0;      // 실제 반영 확인된 횟수
+    let unverifiedTotal = 0;   // 검증 불가로 집계한 횟수
+    const docKey = { userId: userId, url: targetUrl, siteName: siteType };
+
+    // 이전 실행에서 남은 lastCount가 있으면 기준으로 사용
+    if (progressCollection) {
+        try {
+            const prev = await progressCollection.findOne(docKey);
+            if (prev && typeof prev.lastCount === 'number' && prev.lastCount > 0) {
+                lastSeen = prev.lastCount;
+                console.log(`[${userId}][W${workerId}] 기준 조회수 복원: ${lastSeen}`);
+            }
+        } catch (e) { /* 무시 */ }
+    }
+
+    const record = async ({ counted, unverified, cur }) => {
+        if (!progressCollection) return;
+        const inc = { attempts: 1 };
+        if (counted) inc.count = 1;
+        if (unverified) inc.unverified = 1;
+        if (!counted && !unverified) inc.notCounted = 1;
+        const set = { updatedAt: new Date() };
+        if (typeof cur === 'number' && cur > 0) set.lastCount = cur;
+        try {
+            await progressCollection.updateOne(docKey, { $inc: inc, $set: set }, { upsert: true });
+        } catch (dbErr) {
+            console.log(`MongoDB 기록 실패: ${dbErr.message}`);
+        }
+    };
 
     try {
         for (let i = 1; i <= myIterations; i++) {
@@ -168,23 +256,42 @@ async function start() {
                     });
                 } else {
                     console.log(`[${userId}][W${workerId}] 미지원 사이트: ${siteType}`);
+                    if (context !== browser) await context.close().catch(() => {});
                     break; 
                 }
-                
+
+                // 부스터 종료 직후 같은 페이지에서 조회수를 읽어 실제 반영 여부를 판정한다.
+                let cur = null;
+                if (isSuccess && canVerify) {
+                    cur = await readCount(page, siteType);
+                }
+
                 if (context !== browser) await context.close().catch(() => {});
                 else await page.close().catch(() => {});
 
-                // 💡 [최적화 2] 매 루프마다 연결하지 않고 이미 연결된 progressCollection 재사용 (유실 0%)
-                if (isSuccess && progressCollection) {
-                    try {
-                        await progressCollection.updateOne(
-                            { userId: userId, url: targetUrl, siteName: siteType },
-                            { $inc: { count: 1 }, $set: { updatedAt: new Date() } },
-                            { upsert: true }
-                        );
-                        console.log(`[MongoDB 기록] ${siteType} 카운트 1 누적 완료`);
-                    } catch (dbErr) {
-                        console.log(`[MongoDB 기록 실패]: ${dbErr.message}`);
+                if (isSuccess) {
+                    if (!canVerify) {
+                        // 조회수를 읽을 수 없는 사이트 — 전송만 확인, 미검증으로 집계
+                        unverifiedTotal += 1;
+                        await record({ counted: false, unverified: true, cur: null });
+                        console.log(`[MongoDB] ${siteType} 미검증 집계 (조회수 규칙 없음)`);
+                    } else if (cur == null) {
+                        // 규칙은 있으나 이번 로드에서 읽기 실패 — 판정 보류, 기준만 유지
+                        await record({ counted: false, unverified: false, cur: null });
+                        console.log(`[검증] ${siteType} 조회수 읽기 실패 — 판정 보류`);
+                    } else if (lastSeen == null) {
+                        // 첫 관측: 기준값만 저장 (이 회차는 판정하지 않음)
+                        lastSeen = cur;
+                        await record({ counted: false, unverified: false, cur: cur });
+                        console.log(`[검증] ${siteType} 기준 조회수 설정: ${cur}`);
+                    } else if (cur > lastSeen) {
+                        countedTotal += 1;
+                        lastSeen = cur;
+                        await record({ counted: true, unverified: false, cur: cur });
+                        console.log(`[검증] ${siteType} 조회수 증가 확인 → 집계 (현재 ${cur})`);
+                    } else {
+                        await record({ counted: false, unverified: false, cur: cur });
+                        console.log(`[검증] ${siteType} 조회수 미반영 (${lastSeen} → ${cur}) — 미집계`);
                     }
                 }
                 
@@ -196,9 +303,31 @@ async function start() {
                 await new Promise(r => setTimeout(r, 5000));
             }
         }
+
+        // 마지막 회차 보정: 반복 종료 후 한 번 더 읽어 미집계분을 확정한다.
+        if (canVerify && countedTotal < myIterations) {
+            let page2 = null;
+            try {
+                page2 = await browser.newPage();
+                await page2.setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
+                await page2.setExtraHTTPHeaders({ 'referer': 'https://www.google.com/', 'accept-language': 'ko-KR,ko;q=0.9' });
+                await page2.goto(targetUrl, { waitUntil: 'networkidle2', timeout: 45000 }).catch(() => {});
+                const cur = await readCount(page2, siteType);
+                if (cur != null && lastSeen != null && cur > lastSeen) {
+                    const gained = Math.min(cur - lastSeen, myIterations - countedTotal);
+                    if (gained > 0) {
+                        countedTotal += gained;
+                        await record({ counted: true, unverified: false, cur: cur });
+                        console.log(`[검증] ${siteType} 최종 확인 +${gained} (현재 ${cur})`);
+                    }
+                }
+            } catch (e) { /* 무시 */ }
+            finally { if (page2) await page2.close().catch(() => {}); }
+        }
     } catch (e) {
         console.error(`[${userId}][W${workerId}] 치명적 에러:`, e.message);
     } finally {
+        console.log(`🏁 [${userId}][W${workerId}] 집계 결과 — 검증 ${countedTotal}회 / 미검증 ${unverifiedTotal}회 / 할당 ${myIterations}회`);
         if (browser) await browser.close().catch(() => {});
         // 💡 [최적화 3] 워커 종료 시 DB 커넥션을 1회 안전하게 닫아줌
         if (dbClient) await dbClient.close().catch(() => {});
@@ -208,5 +337,3 @@ async function start() {
 }
 
 start();
-
-
