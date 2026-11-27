@@ -40,6 +40,7 @@ const runNaverStock = require('./boosters/naver_stock');
 const runBbasak = require('./boosters/bbasak');
 const runDvdprime = require('./boosters/dvdprime');
 const runFootsell = require('./boosters/footsell');
+const runEtc = require('./boosters/etc');
 
 const stealth = StealthPlugin();
 stealth.enabledEvasions.delete('user-agent-override');
@@ -56,7 +57,8 @@ const boosters = {
     BLIND: runBlind, DEALBADA: runDealbada, TE31: runTe31, ZOD: runZod,
     DASAJA: runDasaja, DEOKJIL: runDeokjil, SLRCLUB: runSlrclub,
     NAVER_STOCK: runNaverStock, CITY: runCity,
-    BBASAK: runBbasak, DVDPRIME: runDvdprime, FOOTSELL: runFootsell
+    BBASAK: runBbasak, DVDPRIME: runDvdprime, FOOTSELL: runFootsell,
+    ETC: runEtc
 };
 
 // ===== HTTP fetch helper =====
